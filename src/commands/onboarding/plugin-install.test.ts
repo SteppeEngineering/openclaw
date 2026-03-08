@@ -1,15 +1,48 @@
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("node:fs", () => ({
-  default: {
-    existsSync: vi.fn(),
-  },
-}));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  const existsSync = vi.fn();
+  return {
+    ...actual,
+    existsSync,
+    default: {
+      ...actual,
+      existsSync,
+    },
+  };
+});
 
 const installPluginFromNpmSpec = vi.fn();
 vi.mock("../../plugins/install.js", () => ({
   installPluginFromNpmSpec: (...args: unknown[]) => installPluginFromNpmSpec(...args),
+}));
+
+const resolveBundledPluginSources = vi.fn();
+vi.mock("../../plugins/bundled-sources.js", () => ({
+  findBundledPluginSourceInMap: ({
+    bundled,
+    lookup,
+  }: {
+    bundled: ReadonlyMap<string, { pluginId: string; localPath: string; npmSpec?: string }>;
+    lookup: { kind: "pluginId" | "npmSpec"; value: string };
+  }) => {
+    const targetValue = lookup.value.trim();
+    if (!targetValue) {
+      return undefined;
+    }
+    if (lookup.kind === "pluginId") {
+      return bundled.get(targetValue);
+    }
+    for (const source of bundled.values()) {
+      if (source.npmSpec === targetValue) {
+        return source;
+      }
+    }
+    return undefined;
+  },
+  resolveBundledPluginSources: (...args: unknown[]) => resolveBundledPluginSources(...args),
 }));
 
 vi.mock("../../plugins/loader.js", () => ({
@@ -41,7 +74,41 @@ const baseEntry: ChannelPluginCatalogEntry = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resolveBundledPluginSources.mockReturnValue(new Map());
 });
+
+function mockRepoLocalPathExists() {
+  vi.mocked(fs.existsSync).mockImplementation((value) => {
+    const raw = String(value);
+    return raw.endsWith(`${path.sep}.git`) || raw.endsWith(`${path.sep}extensions${path.sep}zalo`);
+  });
+}
+
+async function runInitialValueForChannel(channel: "dev" | "beta") {
+  const runtime = makeRuntime();
+  const select = vi.fn((async <T extends string>() => "skip" as T) as WizardPrompter["select"]);
+  const prompter = makePrompter({ select: select as unknown as WizardPrompter["select"] });
+  const cfg: OpenClawConfig = { update: { channel } };
+  mockRepoLocalPathExists();
+
+  await ensureOnboardingPluginInstalled({
+    cfg,
+    entry: baseEntry,
+    prompter,
+    runtime,
+  });
+
+  const call = select.mock.calls[0];
+  return call?.[0]?.initialValue;
+}
+
+function expectPluginLoadedFromLocalPath(
+  result: Awaited<ReturnType<typeof ensureOnboardingPluginInstalled>>,
+) {
+  const expectedPath = path.resolve(process.cwd(), "extensions/zalo");
+  expect(result.installed).toBe(true);
+  expect(result.cfg.plugins?.load?.paths).toContain(expectedPath);
+}
 
 describe("ensureOnboardingPluginInstalled", () => {
   it("installs from npm and enables the plugin", async () => {
@@ -82,12 +149,7 @@ describe("ensureOnboardingPluginInstalled", () => {
       select: vi.fn(async () => "local") as WizardPrompter["select"],
     });
     const cfg: OpenClawConfig = {};
-    vi.mocked(fs.existsSync).mockImplementation((value) => {
-      const raw = String(value);
-      return (
-        raw.endsWith(`${path.sep}.git`) || raw.endsWith(`${path.sep}extensions${path.sep}zalo`)
-      );
-    });
+    mockRepoLocalPathExists();
 
     const result = await ensureOnboardingPluginInstalled({
       cfg,
@@ -96,46 +158,36 @@ describe("ensureOnboardingPluginInstalled", () => {
       runtime,
     });
 
-    const expectedPath = path.resolve(process.cwd(), "extensions/zalo");
-    expect(result.installed).toBe(true);
-    expect(result.cfg.plugins?.load?.paths).toContain(expectedPath);
+    expectPluginLoadedFromLocalPath(result);
     expect(result.cfg.plugins?.entries?.zalo?.enabled).toBe(true);
   });
 
   it("defaults to local on dev channel when local path exists", async () => {
-    const runtime = makeRuntime();
-    const select = vi.fn(async () => "skip") as WizardPrompter["select"];
-    const prompter = makePrompter({ select });
-    const cfg: OpenClawConfig = { update: { channel: "dev" } };
-    vi.mocked(fs.existsSync).mockImplementation((value) => {
-      const raw = String(value);
-      return (
-        raw.endsWith(`${path.sep}.git`) || raw.endsWith(`${path.sep}extensions${path.sep}zalo`)
-      );
-    });
-
-    await ensureOnboardingPluginInstalled({
-      cfg,
-      entry: baseEntry,
-      prompter,
-      runtime,
-    });
-
-    const firstCall = select.mock.calls[0]?.[0];
-    expect(firstCall?.initialValue).toBe("local");
+    expect(await runInitialValueForChannel("dev")).toBe("local");
   });
 
   it("defaults to npm on beta channel even when local path exists", async () => {
+    expect(await runInitialValueForChannel("beta")).toBe("npm");
+  });
+
+  it("defaults to bundled local path on beta channel when available", async () => {
     const runtime = makeRuntime();
-    const select = vi.fn(async () => "skip") as WizardPrompter["select"];
-    const prompter = makePrompter({ select });
+    const select = vi.fn((async <T extends string>() => "skip" as T) as WizardPrompter["select"]);
+    const prompter = makePrompter({ select: select as unknown as WizardPrompter["select"] });
     const cfg: OpenClawConfig = { update: { channel: "beta" } };
-    vi.mocked(fs.existsSync).mockImplementation((value) => {
-      const raw = String(value);
-      return (
-        raw.endsWith(`${path.sep}.git`) || raw.endsWith(`${path.sep}extensions${path.sep}zalo`)
-      );
-    });
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    resolveBundledPluginSources.mockReturnValue(
+      new Map([
+        [
+          "zalo",
+          {
+            pluginId: "zalo",
+            localPath: "/opt/openclaw/extensions/zalo",
+            npmSpec: "@openclaw/zalo",
+          },
+        ],
+      ]),
+    );
 
     await ensureOnboardingPluginInstalled({
       cfg,
@@ -144,8 +196,17 @@ describe("ensureOnboardingPluginInstalled", () => {
       runtime,
     });
 
-    const firstCall = select.mock.calls[0]?.[0];
-    expect(firstCall?.initialValue).toBe("npm");
+    expect(select).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialValue: "local",
+        options: expect.arrayContaining([
+          expect.objectContaining({
+            value: "local",
+            hint: "/opt/openclaw/extensions/zalo",
+          }),
+        ]),
+      }),
+    );
   });
 
   it("falls back to local path after npm install failure", async () => {
@@ -158,12 +219,7 @@ describe("ensureOnboardingPluginInstalled", () => {
       confirm,
     });
     const cfg: OpenClawConfig = {};
-    vi.mocked(fs.existsSync).mockImplementation((value) => {
-      const raw = String(value);
-      return (
-        raw.endsWith(`${path.sep}.git`) || raw.endsWith(`${path.sep}extensions${path.sep}zalo`)
-      );
-    });
+    mockRepoLocalPathExists();
     installPluginFromNpmSpec.mockResolvedValue({
       ok: false,
       error: "nope",
@@ -176,9 +232,7 @@ describe("ensureOnboardingPluginInstalled", () => {
       runtime,
     });
 
-    const expectedPath = path.resolve(process.cwd(), "extensions/zalo");
-    expect(result.installed).toBe(true);
-    expect(result.cfg.plugins?.load?.paths).toContain(expectedPath);
+    expectPluginLoadedFromLocalPath(result);
     expect(note).toHaveBeenCalled();
     expect(runtime.error).not.toHaveBeenCalled();
   });

@@ -88,7 +88,7 @@ export class VoiceBot {
     if (this.runtime) {
       this.sessionManager = createVoiceSessionManager({
         runtime: this.runtime,
-        sessionKey: "voice-main",
+        sessionKey: "main",
         agentId: "main",
       });
       await this.sessionManager.initialize();

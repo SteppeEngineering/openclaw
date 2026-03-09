@@ -20,7 +20,7 @@ export type VoiceResponse = {
 
 /**
  * Voice session manager
- * Creates and manages a persistent session for voice interactions
+ * Routes voice messages to the main session for cross-channel context
  */
 export class VoiceSessionManager {
   private runtime: RuntimeEnv;
@@ -29,22 +29,22 @@ export class VoiceSessionManager {
 
   constructor(params: { runtime: RuntimeEnv; sessionKey?: string; agentId?: string }) {
     this.runtime = params.runtime;
-    this.sessionKey = params.sessionKey || "voice-main";
+    this.sessionKey = params.sessionKey || "main";
     this.agentId = params.agentId || "main";
   }
 
   /**
    * Initialize voice session
-   * Creates a persistent session for all voice queries
+   * Routes to main session for shared context with other channels (TUI, Telegram, etc.)
    */
   async initialize(): Promise<void> {
-    log.info(`Initializing voice session: ${this.sessionKey}`);
+    log.info(`Voice routing to session: ${this.sessionKey}`);
 
-    // TODO: Create session using runtime.sessions API
+    // TODO: Integrate with runtime.sessions API
     // For Phase 2, we'll use a simple approach
     // In Phase 3, integrate with full session management
 
-    log.info("✓ Voice session ready");
+    log.info("✓ Voice session routing ready");
   }
 
   /**

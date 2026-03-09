@@ -6,7 +6,11 @@
 import { getChildLogger } from "../logging.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { MockVoiceHardware } from "./hardware/mock-hardware.js";
+import { PiHardware } from "./hardware/pi-hardware.js";
 import type { VoiceHardware } from "./hardware/types.js";
+import { createWavBuffer, transcribeAudio } from "./services/deepgram.js";
+import { generateSpeech } from "./services/chatterbox.js";
+import { createVoiceSessionManager, type VoiceSessionManager } from "./voice-message-dispatch.js";
 import { DEFAULT_VOICE_CONFIG, resolveVoiceConfig, type VoiceChannelConfig } from "./voice-config.js";
 
 const log = getChildLogger("voice-bot");
@@ -21,22 +25,45 @@ export class VoiceBot {
   private config: Required<VoiceChannelConfig>;
   private runtime?: RuntimeEnv;
   private hardware: VoiceHardware;
+  private sessionManager?: VoiceSessionManager;
   private isRunning = false;
+  private recordingBuffer: Buffer[] = [];
 
   constructor(opts: VoiceBotOptions = {}) {
     this.config = resolveVoiceConfig(opts.config);
     this.runtime = opts.runtime;
 
-    // Use provided hardware or create mock
+    // Use provided hardware or create based on config
     if (opts.hardware) {
       this.hardware = opts.hardware;
     } else if (this.config.useMockHardware) {
       log.info("Using mock hardware (no physical Pi required)");
       this.hardware = new MockVoiceHardware();
     } else {
-      // TODO: Create real PiHardware when implemented
-      log.warn("Real Pi hardware not implemented yet, falling back to mock");
-      this.hardware = new MockVoiceHardware();
+      log.info("Using real Pi hardware");
+      this.hardware = new PiHardware({
+        gpio: {
+          pttButton: this.config.hardware.pttButton,
+          encoderClk: this.config.hardware.encoder.clk,
+          encoderDt: this.config.hardware.encoder.dt,
+          encoderSw: this.config.hardware.encoder.sw,
+          oledDc: this.config.hardware.oled.dc,
+          oledRst: this.config.hardware.oled.rst,
+        },
+        spi: {
+          bus: 0,
+          device: 0,
+        },
+        audio: {
+          device: this.config.audio.device,
+          rate: this.config.audio.rate,
+          chunkSize: this.config.audio.chunkSize,
+        },
+        display: {
+          width: this.config.hardware.oled.width,
+          height: this.config.hardware.oled.height,
+        },
+      });
     }
   }
 
@@ -55,6 +82,18 @@ export class VoiceBot {
     const initialized = await this.hardware.initialize();
     if (!initialized) {
       throw new Error("Failed to initialize voice hardware");
+    }
+
+    // Initialize session manager
+    if (this.runtime) {
+      this.sessionManager = createVoiceSessionManager({
+        runtime: this.runtime,
+        sessionKey: "voice-main",
+        agentId: "main",
+      });
+      await this.sessionManager.initialize();
+    } else {
+      log.warn("No runtime provided, voice messages will not be routed to agent");
     }
 
     // Register hardware event handlers
@@ -78,10 +117,22 @@ export class VoiceBot {
     log.info("Stopping voice bot...");
     this.isRunning = false;
 
+    // Cleanup session manager
+    if (this.sessionManager) {
+      await this.sessionManager.cleanup();
+    }
+
     // Cleanup hardware
     await this.hardware.cleanup();
 
     log.info("Voice bot stopped");
+  }
+
+  /**
+   * Sleep helper
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
@@ -128,39 +179,99 @@ export class VoiceBot {
    */
   private async handlePTTReleased(): Promise<void> {
     log.info("PTT button released - process recording");
-    this.hardware.updateDisplay({
-      type: "voice",
-      content: {
-        voiceState: "transcribing",
-      },
-    });
 
-    // TODO: Stop recording, transcribe, route to session
-    // For now, just demonstrate the flow
-    setTimeout(() => {
+    try {
+      // Get recorded audio
+      const audioBuffer = await this.hardware.recordAudio();
+
+      if (audioBuffer.length === 0) {
+        log.warn("No audio recorded");
+        this.hardware.updateDisplay({ type: "home" });
+        return;
+      }
+
+      // Transcribe audio
+      this.hardware.updateDisplay({
+        type: "voice",
+        content: { voiceState: "transcribing" },
+      });
+
+      const deepgramConfig = {
+        apiKey: this.config.services.deepgram.apiKey,
+        model: this.config.services.deepgram.model,
+      };
+
+      // Convert PCM to WAV if needed
+      const wavBuffer = createWavBuffer(audioBuffer, this.config.audio.rate);
+      const transcription = await transcribeAudio(wavBuffer, deepgramConfig);
+
+      if (!transcription || !transcription.transcript) {
+        log.warn("Transcription failed or empty");
+        this.hardware.updateDisplay({ type: "home" });
+        return;
+      }
+
+      log.info(`Transcribed: "${transcription.transcript}"`);
+
+      // Pause before ack (natural timing)
+      await this.sleep(this.config.ui.ackDelay);
+
+      // TODO: Play acknowledgment audio
+
+      // Send to agent session
       this.hardware.updateDisplay({
         type: "voice",
         content: {
           voiceState: "thinking",
-          text: "Test query (mock)",
+          text: transcription.transcript,
         },
       });
 
-      setTimeout(() => {
-        this.hardware.updateDisplay({
-          type: "voice",
-          content: {
-            voiceState: "response",
-            response: "This is a test response from the voice bot.",
-          },
-        });
+      const response = this.sessionManager
+        ? await this.sessionManager.sendMessage({
+            transcript: transcription.transcript,
+            confidence: transcription.confidence,
+            timestamp: new Date(),
+          })
+        : null;
 
-        // Return to home after delay
-        setTimeout(() => {
-          this.hardware.updateDisplay({ type: "home" });
-        }, this.config.ui.returnHomeDelay);
-      }, 2000);
-    }, 1000);
+      if (!response) {
+        log.warn("No response from agent");
+        this.hardware.updateDisplay({ type: "home" });
+        return;
+      }
+
+      // Generate TTS
+      this.hardware.updateDisplay({
+        type: "voice",
+        content: {
+          voiceState: "response",
+          response: response.text,
+        },
+      });
+
+      const chatterboxConfig = {
+        url: this.config.services.chatterbox.url,
+        voiceSample: this.config.services.chatterbox.voiceSample,
+        exaggeration: this.config.services.chatterbox.exaggeration,
+        cfgWeight: this.config.services.chatterbox.cfgWeight,
+        temperature: this.config.services.chatterbox.temperature,
+      };
+
+      const audioResponse = await generateSpeech(response.text, chatterboxConfig);
+
+      if (audioResponse) {
+        // Play audio response
+        await this.hardware.playAudio(audioResponse);
+      }
+
+      // Return to home after delay
+      await this.sleep(this.config.ui.returnHomeDelay);
+      this.hardware.updateDisplay({ type: "home" });
+    } catch (err) {
+      log.error("Error processing voice query:", err);
+      this.hardware.updateDisplay({ type: "home" });
+    }
   }
 
   /**

@@ -1,49 +1,62 @@
 # Voice Channel - OpenClaw Integration
 
-**Status:** Phase 1 - Minimal Proof of Concept  
+**Status:** Phase 2 - Hardware & Service Integration  
 **Branch:** `feature/voice-channel`
 
 ## Overview
 
 Voice channel for OpenClaw, enabling hands-free voice interaction with full conversation context, memory access, and tool availability.
 
-## Current Implementation (Phase 1)
+## Current Implementation (Phase 2)
 
-**Phase 1 Goal:** Basic structure and hardware abstraction without real hardware or session integration.
+**Phase 2 Goal:** Real hardware support and service integration.
 
 **Implemented:**
 - ✅ Hardware abstraction interface (`VoiceHardware`)
 - ✅ Mock hardware implementation for testing
+- ✅ **Real Pi hardware implementation (`PiHardware`)**
+  - GPIO button/encoder handling via `onoff` library
+  - SPI communication for OLED via `spi-device`
+  - Display initialization (SSD1309)
 - ✅ Configuration schema with defaults
-- ✅ Basic voice bot initialization
+- ✅ Voice bot initialization and lifecycle
 - ✅ Hardware event handlers (PTT, encoder)
 - ✅ Display state management
+- ✅ **Deepgram STT service integration**
+- ✅ **Chatterbox TTS service integration**
+- ✅ **Session routing and message dispatch**
+- ✅ **Full voice pipeline** (record → transcribe → respond → TTS → play)
 - ✅ Unit tests
 
 **Not Yet Implemented:**
-- ❌ Real Pi hardware (GPIO, SPI, audio)
-- ❌ Session routing and message dispatch
-- ❌ STT integration (Deepgram)
-- ❌ TTS integration (Chatterbox)
-- ❌ OLED rendering
+- ❌ Audio recording (via arecord or node bindings)
+- ❌ Audio playback (via aplay or node bindings)
+- ❌ OLED rendering (bitmap generation for text/UI)
+- ❌ Real session integration (currently mock responses)
 - ❌ Gateway integration
+- ❌ Acknowledgment audio playback
 
 ## File Structure
 
 ```
 src/voice/
-├── voice-bot.ts              # Main bot initialization
-├── voice-bot.test.ts         # Unit tests
-├── voice-config.ts           # Configuration types and defaults
-├── test-standalone.ts        # Standalone test script
-├── README.md                 # This file
+├── voice-bot.ts                    # Main bot initialization
+├── voice-bot.test.ts               # Unit tests
+├── voice-config.ts                 # Configuration types and defaults
+├── voice-message-dispatch.ts      # Session routing and message dispatch
+├── test-standalone.ts              # Standalone test script
+├── README.md                       # This file
 │
 ├── hardware/
-│   ├── types.ts              # Hardware abstraction interface
-│   └── mock-hardware.ts      # Mock implementation for testing
+│   ├── types.ts                    # Hardware abstraction interface
+│   ├── mock-hardware.ts            # Mock implementation for testing
+│   └── pi-hardware.ts              # Real Pi GPIO/SPI/audio implementation
 │
-├── ui/                       # (not yet implemented)
-├── services/                 # (not yet implemented)
+├── services/
+│   ├── deepgram.ts                 # Deepgram STT integration
+│   └── chatterbox.ts               # Chatterbox TTS integration
+│
+└── ui/                             # (Phase 3 - OLED rendering)
 ```
 
 ## Testing

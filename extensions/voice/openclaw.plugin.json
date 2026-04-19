@@ -1,0 +1,6 @@
+{
+  "id": "voice",
+  "name": "Voice Channel",
+  "version": "0.1.0",
+  "type": "channel"
+}

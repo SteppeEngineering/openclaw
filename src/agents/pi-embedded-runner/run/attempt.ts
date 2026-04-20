@@ -105,7 +105,10 @@ import {
   applySkillEnvOverridesFromSnapshot,
   resolveSkillsPromptForRun,
 } from "../../skills.js";
-import { resolveSystemPromptOverride } from "../../system-prompt-override.js";
+import {
+  resolveSystemPromptOverride,
+  resolveSystemPromptAppend,
+} from "../../system-prompt-override.js";
 import { buildSystemPromptParams } from "../../system-prompt-params.js";
 import { buildSystemPromptReport } from "../../system-prompt-report.js";
 import { resolveAgentTimeoutMs } from "../../timeout.js";
@@ -928,6 +931,16 @@ export async function runEmbeddedAttempt(
     });
     const systemPromptOverride = createSystemPromptOverride(appendPrompt);
     let systemPromptText = systemPromptOverride();
+
+    // Apply systemPromptAppend if configured (after workspace context, before conversation history)
+    const systemPromptAppendText = resolveSystemPromptAppend({
+      config: params.config,
+      agentId: sessionAgentId,
+    });
+    if (systemPromptAppendText) {
+      systemPromptText = systemPromptText + "\n\n" + systemPromptAppendText;
+    }
+
     const userPromptPrefixText = bootstrapRouting.userPromptPrefixText;
 
     let sessionManager: ReturnType<typeof guardSessionManager> | undefined;

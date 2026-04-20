@@ -49,6 +49,7 @@ export const AgentDefaultsSchema = z
     skills: z.array(z.string()).optional(),
     repoRoot: z.string().optional(),
     systemPromptOverride: z.string().optional(),
+    systemPromptAppend: z.string().optional(),
     skipBootstrap: z.boolean().optional(),
     contextInjection: z.union([z.literal("always"), z.literal("continuation-skip")]).optional(),
     bootstrapMaxChars: z.number().int().positive().optional(),

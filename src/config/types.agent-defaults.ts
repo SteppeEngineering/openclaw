@@ -195,6 +195,8 @@ export type AgentDefaultsConfig = {
   repoRoot?: string;
   /** Optional full system prompt replacement. Primarily for prompt debugging and controlled experiments. */
   systemPromptOverride?: string;
+  /** Optional text to append to the end of the system prompt (after workspace context, before conversation history). */
+  systemPromptAppend?: string;
   /** Skip bootstrap (BOOTSTRAP.md creation, etc.) for pre-configured deployments. */
   skipBootstrap?: boolean;
   /**

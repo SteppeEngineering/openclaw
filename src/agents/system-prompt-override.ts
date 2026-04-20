@@ -25,3 +25,20 @@ export function resolveSystemPromptOverride(params: {
   }
   return trimNonEmpty(config.agents?.defaults?.systemPromptOverride);
 }
+
+export function resolveSystemPromptAppend(params: {
+  config?: OpenClawConfig;
+  agentId?: string;
+}): string | undefined {
+  const config = params.config;
+  if (!config) {
+    return undefined;
+  }
+  const agentAppend = trimNonEmpty(
+    params.agentId ? resolveAgentConfig(config, params.agentId)?.systemPromptAppend : undefined,
+  );
+  if (agentAppend) {
+    return agentAppend;
+  }
+  return trimNonEmpty(config.agents?.defaults?.systemPromptAppend);
+}

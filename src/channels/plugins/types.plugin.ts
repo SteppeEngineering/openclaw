@@ -1,19 +1,34 @@
-import type { ChannelOnboardingAdapter } from "./onboarding-types.js";
+import type { ChannelSetupWizard, ChannelSetupWizardAdapter } from "./setup-wizard-types.js";
+import type { ChannelConfigSchema } from "./types.config.js";
+export type {
+  ChannelConfigRuntimeIssue,
+  ChannelConfigRuntimeParseResult,
+  ChannelConfigRuntimeSchema,
+  ChannelConfigSchema,
+  ChannelConfigUiHint,
+} from "./types.config.js";
 import type {
+  ChannelApprovalCapability,
   ChannelAuthAdapter,
   ChannelCommandAdapter,
   ChannelConfigAdapter,
+  ChannelConversationBindingSupport,
+  ChannelDoctorAdapter,
   ChannelDirectoryAdapter,
   ChannelResolverAdapter,
   ChannelElevatedAdapter,
   ChannelGatewayAdapter,
   ChannelGroupAdapter,
   ChannelHeartbeatAdapter,
+  ChannelLifecycleAdapter,
   ChannelOutboundAdapter,
   ChannelPairingAdapter,
+  ChannelSecretsAdapter,
   ChannelSecurityAdapter,
   ChannelSetupAdapter,
   ChannelStatusAdapter,
+  ChannelAllowlistAdapter,
+  ChannelConfiguredBindingProvider,
 } from "./types.adapters.js";
 import type {
   ChannelAgentTool,
@@ -29,23 +44,13 @@ import type {
   ChannelThreadingAdapter,
 } from "./types.core.js";
 
-// Channel docking: implement this contract in src/channels/plugins/<id>.ts.
-export type ChannelConfigUiHint = {
-  label?: string;
-  help?: string;
-  advanced?: boolean;
-  sensitive?: boolean;
-  placeholder?: string;
-  itemTemplate?: unknown;
-};
+/** Full capability contract for a native channel plugin. */
+type ChannelPluginSetupWizard = ChannelSetupWizard | ChannelSetupWizardAdapter;
 
-export type ChannelConfigSchema = {
-  schema: Record<string, unknown>;
-  uiHints?: Record<string, ChannelConfigUiHint>;
-};
-
+// Omitted generic means "plugin with some account shape", not "plugin whose
+// account is literally Record<string, unknown>".
 // oxlint-disable-next-line typescript/no-explicit-any
-export type ChannelPlugin<ResolvedAccount = any> = {
+export type ChannelPlugin<ResolvedAccount = any, Probe = unknown, Audit = unknown> = {
   id: ChannelId;
   meta: ChannelMeta;
   capabilities: ChannelCapabilities;
@@ -55,8 +60,7 @@ export type ChannelPlugin<ResolvedAccount = any> = {
     };
   };
   reload?: { configPrefixes: string[]; noopPrefixes?: string[] };
-  // CLI onboarding wizard hooks for this channel.
-  onboarding?: ChannelOnboardingAdapter;
+  setupWizard?: ChannelPluginSetupWizard;
   config: ChannelConfigAdapter<ResolvedAccount>;
   configSchema?: ChannelConfigSchema;
   setup?: ChannelSetupAdapter;
@@ -65,12 +69,20 @@ export type ChannelPlugin<ResolvedAccount = any> = {
   groups?: ChannelGroupAdapter;
   mentions?: ChannelMentionAdapter;
   outbound?: ChannelOutboundAdapter;
-  status?: ChannelStatusAdapter<ResolvedAccount>;
+  status?: ChannelStatusAdapter<ResolvedAccount, Probe, Audit>;
   gatewayMethods?: string[];
   gateway?: ChannelGatewayAdapter<ResolvedAccount>;
+  // Login/logout and channel-auth only. Approval auth lives on approvalCapability.
   auth?: ChannelAuthAdapter;
+  approvalCapability?: ChannelApprovalCapability;
   elevated?: ChannelElevatedAdapter;
   commands?: ChannelCommandAdapter;
+  lifecycle?: ChannelLifecycleAdapter;
+  secrets?: ChannelSecretsAdapter;
+  allowlist?: ChannelAllowlistAdapter;
+  doctor?: ChannelDoctorAdapter;
+  bindings?: ChannelConfiguredBindingProvider;
+  conversationBindings?: ChannelConversationBindingSupport;
   streaming?: ChannelStreamingAdapter;
   threading?: ChannelThreadingAdapter;
   messaging?: ChannelMessagingAdapter;

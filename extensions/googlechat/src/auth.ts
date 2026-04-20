@@ -1,4 +1,5 @@
 import { GoogleAuth, OAuth2Client } from "google-auth-library";
+import { fetchWithSsrFGuard } from "../runtime-api.js";
 import type { ResolvedGoogleChatAccount } from "./accounts.js";
 
 const CHAT_SCOPE = "https://www.googleapis.com/auth/chat.bot";
@@ -8,10 +9,16 @@ const ADDON_ISSUER_PATTERN = /^service-\d+@gcp-sa-gsuiteaddons\.iam\.gserviceacc
 const CHAT_CERTS_URL =
   "https://www.googleapis.com/service_accounts/v1/metadata/x509/chat@system.gserviceaccount.com";
 
+// Size-capped to prevent unbounded growth in long-running deployments (#4948)
+const MAX_AUTH_CACHE_SIZE = 32;
 const authCache = new Map<string, { key: string; auth: GoogleAuth }>();
 const verifyClient = new OAuth2Client();
 
 let cachedCerts: { fetchedAt: number; certs: Record<string, string> } | null = null;
+
+function normalizeLowercaseStringOrEmpty(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
 
 function buildAuthKey(account: ResolvedGoogleChatAccount): string {
   if (account.credentialsFile) {
@@ -30,20 +37,32 @@ function getAuthInstance(account: ResolvedGoogleChatAccount): GoogleAuth {
     return cached.auth;
   }
 
+  const evictOldest = () => {
+    if (authCache.size > MAX_AUTH_CACHE_SIZE) {
+      const oldest = authCache.keys().next().value;
+      if (oldest !== undefined) {
+        authCache.delete(oldest);
+      }
+    }
+  };
+
   if (account.credentialsFile) {
     const auth = new GoogleAuth({ keyFile: account.credentialsFile, scopes: [CHAT_SCOPE] });
     authCache.set(account.accountId, { key, auth });
+    evictOldest();
     return auth;
   }
 
   if (account.credentials) {
     const auth = new GoogleAuth({ credentials: account.credentials, scopes: [CHAT_SCOPE] });
     authCache.set(account.accountId, { key, auth });
+    evictOldest();
     return auth;
   }
 
   const auth = new GoogleAuth({ scopes: [CHAT_SCOPE] });
   authCache.set(account.accountId, { key, auth });
+  evictOldest();
   return auth;
 }
 
@@ -65,13 +84,20 @@ async function fetchChatCerts(): Promise<Record<string, string>> {
   if (cachedCerts && now - cachedCerts.fetchedAt < 10 * 60 * 1000) {
     return cachedCerts.certs;
   }
-  const res = await fetch(CHAT_CERTS_URL);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch Chat certs (${res.status})`);
+  const { response, release } = await fetchWithSsrFGuard({
+    url: CHAT_CERTS_URL,
+    auditContext: "googlechat.auth.certs",
+  });
+  try {
+    if (!response.ok) {
+      throw new Error(`Failed to fetch Chat certs (${response.status})`);
+    }
+    const certs = (await response.json()) as Record<string, string>;
+    cachedCerts = { fetchedAt: now, certs };
+    return certs;
+  } finally {
+    await release();
   }
-  const certs = (await res.json()) as Record<string, string>;
-  cachedCerts = { fetchedAt: now, certs };
-  return certs;
 }
 
 export type GoogleChatAudienceType = "app-url" | "project-number";
@@ -80,6 +106,7 @@ export async function verifyGoogleChatRequest(params: {
   bearer?: string | null;
   audienceType?: GoogleChatAudienceType | null;
   audience?: string | null;
+  expectedAddOnPrincipal?: string | null;
 }): Promise<{ ok: boolean; reason?: string }> {
   const bearer = params.bearer?.trim();
   if (!bearer) {
@@ -98,10 +125,30 @@ export async function verifyGoogleChatRequest(params: {
         audience,
       });
       const payload = ticket.getPayload();
-      const email = payload?.email ?? "";
-      const ok =
-        payload?.email_verified && (email === CHAT_ISSUER || ADDON_ISSUER_PATTERN.test(email));
-      return ok ? { ok: true } : { ok: false, reason: `invalid issuer: ${email}` };
+      const email = normalizeLowercaseStringOrEmpty(payload?.email ?? "");
+      if (!payload?.email_verified) {
+        return { ok: false, reason: "email not verified" };
+      }
+      if (email === CHAT_ISSUER) {
+        return { ok: true };
+      }
+      if (!ADDON_ISSUER_PATTERN.test(email)) {
+        return { ok: false, reason: `invalid issuer: ${email}` };
+      }
+      const expectedAddOnPrincipal = normalizeLowercaseStringOrEmpty(
+        params.expectedAddOnPrincipal ?? "",
+      );
+      if (!expectedAddOnPrincipal) {
+        return { ok: false, reason: "missing add-on principal binding" };
+      }
+      const tokenPrincipal = normalizeLowercaseStringOrEmpty(payload?.sub ?? "");
+      if (!tokenPrincipal || tokenPrincipal !== expectedAddOnPrincipal) {
+        return {
+          ok: false,
+          reason: `unexpected add-on principal: ${tokenPrincipal || "<missing>"}`,
+        };
+      }
+      return { ok: true };
     } catch (err) {
       return { ok: false, reason: err instanceof Error ? err.message : "invalid token" };
     }

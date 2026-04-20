@@ -61,20 +61,22 @@ node --import tsx scripts/repro/tsx-name-repro.ts
 ## Workarounds
 
 - Use Bun for dev scripts (current temporary revert).
-- Use Node + tsc watch, then run compiled output:
+- Use `tsgo` for repo type checking, then run the built output:
+
   ```bash
-  pnpm exec tsc --watch --preserveWatchOutput
-  node --watch openclaw.mjs status
+  pnpm tsgo
+  node openclaw.mjs status
   ```
-- Confirmed locally: `pnpm exec tsc -p tsconfig.json` + `node openclaw.mjs status` works on Node 25.
+
+- Historical note: `tsc` was used here while debugging this Node/tsx issue, but repo type-check lanes now use `tsgo`.
 - Disable esbuild keepNames in the TS loader if possible (prevents `__name` helper insertion); tsx does not currently expose this.
 - Test Node LTS (22/24) with `tsx` to see if the issue is Node 25–specific.
 
 ## References
 
-- https://opennext.js.org/cloudflare/howtos/keep_names
-- https://esbuild.github.io/api/#keep-names
-- https://github.com/evanw/esbuild/issues/1031
+- [https://opennext.js.org/cloudflare/howtos/keep_names](https://opennext.js.org/cloudflare/howtos/keep_names)
+- [https://esbuild.github.io/api/#keep-names](https://esbuild.github.io/api/#keep-names)
+- [https://github.com/evanw/esbuild/issues/1031](https://github.com/evanw/esbuild/issues/1031)
 
 ## Next steps
 

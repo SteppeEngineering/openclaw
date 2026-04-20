@@ -1,4 +1,5 @@
 import { formatToolSummary, resolveToolDisplay } from "../agents/tool-display.js";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { shortenHomeInString, shortenHomePath } from "../utils.js";
 
 type ToolAggregateOptions = {
@@ -13,13 +14,7 @@ export function shortenMeta(meta: string): string {
   if (!meta) {
     return meta;
   }
-  const colonIdx = meta.indexOf(":");
-  if (colonIdx === -1) {
-    return shortenHomeInString(meta);
-  }
-  const base = meta.slice(0, colonIdx);
-  const rest = meta.slice(colonIdx);
-  return `${shortenHomeInString(base)}${rest}`;
+  return shortenHomeInString(meta);
 }
 
 export function formatToolAggregate(
@@ -86,7 +81,7 @@ function formatMetaForDisplay(
   meta: string,
   markdown?: boolean,
 ): string {
-  const normalized = (toolName ?? "").trim().toLowerCase();
+  const normalized = normalizeLowercaseStringOrEmpty(toolName);
   if (normalized === "exec" || normalized === "bash") {
     const { flags, body } = splitExecFlags(meta);
     if (flags.length > 0) {

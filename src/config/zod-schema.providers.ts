@@ -8,9 +8,22 @@ import { resolveLoaderPackageRoot } from "../plugins/sdk-alias.js";
 import type { ChannelsConfig } from "./types.channels.js";
 import { ChannelHeartbeatVisibilitySchema } from "./zod-schema.channels.js";
 import { ContextVisibilityModeSchema, GroupPolicySchema } from "./zod-schema.core.js";
+import {
+  BlueBubblesConfigSchema,
+  DiscordConfigSchema,
+  GoogleChatConfigSchema,
+  IMessageConfigSchema,
+  MSTeamsConfigSchema,
+  SignalConfigSchema,
+  SlackConfigSchema,
+  TelegramConfigSchema,
+} from "./zod-schema.providers-core.js";
+import { VoiceChannelConfigSchema } from "./zod-schema.voice.js";
+import { WhatsAppConfigSchema } from "./zod-schema.providers-whatsapp.js";
 
 export * from "./zod-schema.providers-core.js";
 export * from "./zod-schema.providers-whatsapp.js";
+export * from "./zod-schema.voice.js";
 export { ChannelHeartbeatVisibilitySchema } from "./zod-schema.channels.js";
 
 const ChannelModelByChannelSchema = z
@@ -150,7 +163,20 @@ export const ChannelsSchema: z.ZodType<ChannelsConfig | undefined> = z
       })
       .strict()
       .optional(),
+<<<<<<< HEAD
     modelByChannel: ChannelModelByChannelSchema,
+=======
+    whatsapp: WhatsAppConfigSchema.optional(),
+    telegram: TelegramConfigSchema.optional(),
+    discord: DiscordConfigSchema.optional(),
+    googlechat: GoogleChatConfigSchema.optional(),
+    slack: SlackConfigSchema.optional(),
+    signal: SignalConfigSchema.optional(),
+    imessage: IMessageConfigSchema.optional(),
+    bluebubbles: BlueBubblesConfigSchema.optional(),
+    msteams: MSTeamsConfigSchema.optional(),
+    voice: VoiceChannelConfigSchema.optional(),
+>>>>>>> dcf488f1c1 (feat: Add ShopClaw voice channel implementation)
   })
   .passthrough() // Allow extension channel configs (nostr, matrix, zalo, etc.)
   .superRefine((value, ctx) => {

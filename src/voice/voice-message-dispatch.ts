@@ -306,18 +306,33 @@ export async function dispatchVoiceMessage(
       return;
     }
     
-    // Step 2: Create message envelope
-    console.log('[Dispatch] Step 2: Creating message envelope...');
+    // Step 2: Play contextual acknowledgment
+    console.log('[Dispatch] Step 2: Playing acknowledgment...');
+    await updateDisplay(hardware, 'Got it', 'Thinking...');
+    
+    // Import and play acknowledgment (non-blocking if we want parallel execution)
+    const { playContextualAck } = await import('./services/acknowledgments.js');
+    
+    // Play ack in background while we prepare the message
+    // This gives natural feedback without adding latency
+    const ackPromise = playContextualAck(transcription.text, config);
+    
+    // Step 3: Create message envelope
+    console.log('[Dispatch] Step 3: Creating message envelope...');
     const envelope = createMessageEnvelope(transcription, config);
     
-    // Step 3: Route to agent session
-    console.log('[Dispatch] Step 3: Routing to agent...');
+    // Wait for acknowledgment to finish before querying agent
+    // This ensures user hears the ack before we start thinking
+    await ackPromise;
+    
+    // Step 4: Route to agent session
+    console.log('[Dispatch] Step 4: Routing to agent...');
     await updateDisplay(hardware, 'Thinking...', 'Agent processing');
     
     const response = await routeToSession(envelope, config);
     
-    // Step 4: Handle response
-    console.log('[Dispatch] Step 4: Delivering response...');
+    // Step 5: Handle response
+    console.log('[Dispatch] Step 5: Delivering response...');
     await handleResponse(response, hardware, bot);
     
     console.log('[Dispatch] Message dispatch complete');

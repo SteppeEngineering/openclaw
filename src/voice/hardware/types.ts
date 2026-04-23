@@ -54,6 +54,18 @@ export interface AudioDevice {
   /** Get current recording state */
   getRecordingState(): RecordingState;
   
+  /** Get current playback volume (0-100) */
+  getVolume(): Promise<number>;
+  
+  /** Set playback volume (0-100) */
+  setVolume(level: number): Promise<void>;
+  
+  /** Adjust volume by delta (-100 to +100) */
+  adjustVolume(delta: number): Promise<number>;
+  
+  /** Mute/unmute audio */
+  setMute(muted: boolean): Promise<void>;
+  
   /** Clean up audio resources */
   close(): Promise<void>;
 }
